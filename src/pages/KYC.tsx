@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'wouter';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, ChevronLeft, Check, Lock, Unlock, Crown, Mail, CreditCard, Camera, Clock, X, AlertCircle, CheckCircle2, KeyRound } from 'lucide-react';
+import { Shield, ChevronLeft, Check, Lock, Crown, Mail, Camera, Clock, X, AlertCircle, CheckCircle2, KeyRound } from 'lucide-react';
 import { supabase, getPlayerId } from '@/lib/supabase';
 import { useApp } from '@/lib/store';
-import { KYC_TIERS, getKycTier, setKycTier, getStoredCountry } from '@/lib/regional';
+import { KYC_TIERS, getKycTier, setKycTier } from '@/lib/regional';
 import { pushToast } from '@/lib/ui';
 
 interface KycRecord {
@@ -17,6 +17,7 @@ export default function KYC() {
   const [currentTier, setCurrentTier] = useState(getKycTier());
   const [showTier2, setShowTier2] = useState(false);
   const [docType, setDocType] = useState('passport');
+  const [file, setFile] = useState<File | null>(null); // NEW: State to hold the uploaded document
   const [submitting, setSubmitting] = useState(false);
   const [records, setRecords] = useState<KycRecord[]>([]);
 
@@ -28,14 +29,40 @@ export default function KYC() {
   };
 
   const submitTier2 = async () => {
+    if (!file) {
+      pushToast('Please select a document to upload.', 'error');
+      return;
+    }
+
     setSubmitting(true);
     try {
-      await supabase.from('kyc_verifications').insert({ player_id: playerId, tier: 2, status: 'pending', document_type: docType, provider: 'manual' });
+      // 1. Upload the ID file to the Supabase storage bucket
+      const fileExt = file.name.split('.').pop();
+      const filePath = `kyc/${playerId}_${Date.now()}.${fileExt}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from('kyc-documents')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      // 2. Insert the pending KYC record into the database
+      const { error: insertError } = await supabase.from('kyc_verifications').insert({ 
+        player_id: playerId, 
+        tier: 2, 
+        status: 'pending', 
+        document_type: docType, 
+        provider: 'manual' 
+      });
+
+      if (insertError) throw insertError;
+
       pushToast('KYC submitted! Verification typically takes 1-24 hours.', 'success');
       setShowTier2(false);
+      setFile(null); // Clear the file state after success
       loadRecords();
-    } catch {
-      pushToast('Submission failed.', 'error');
+    } catch (err: any) {
+      pushToast(err.message || 'Submission failed.', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -107,7 +134,7 @@ export default function KYC() {
             <div className="space-y-2">{records.map((r) => (
               <div key={r.id} className="flex items-center justify-between rounded-lg bg-ink-800 p-3 text-xs">
                 <div className="flex items-center gap-2"><span className={`w-1.5 h-1.5 rounded-full ${r.status === 'approved' ? 'bg-jade-400' : r.status === 'pending' ? 'bg-gold-400 animate-pulse' : 'bg-blood-400'}`} /><span className="text-white">Tier {r.tier}</span><span className="text-zinc-500">{r.document_type || 'Email'}</span></div>
-                <div className="flex items-center gap-2"><span className={`font-semibold capitalize ${r.status === 'approved' ? 'text-jade-400' : r.status === 'pending' ? 'text-gold-400' : 'text-blood-400'}`}>{r.status}</span><span className="text-zinc-600">{new Date(r.submitted_at).toLocaleDateString()}</span></div>
+                <div className="flex items-center gap-2"><span className={`font-capitalize font-semibold ${r.status === 'approved' ? 'text-jade-400' : r.status === 'pending' ? 'text-gold-400' : 'text-blood-400'}`}>{r.status}</span><span className="text-zinc-600">{new Date(r.submitted_at).toLocaleDateString()}</span></div>
               </div>
             ))}</div>
             {records.some((r) => r.status === 'pending') && <button onClick={simulateApproval} className="w-full mt-3 py-2 rounded-lg bg-ink-700 text-zinc-400 text-xs font-semibold border border-ink-600">Simulate Approval (Demo)</button>}
@@ -154,16 +181,47 @@ export default function KYC() {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowTier2(false)} className="fixed inset-0 z-[95] flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
               <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} onClick={(e) => e.stopPropagation()} className="max-w-md w-full glass-strong rounded-3xl border border-curse-500/40 p-5">
                 <div className="flex items-center justify-between mb-4"><h3 className="font-display font-bold text-white">Tier 2 Verification</h3><button onClick={() => setShowTier2(false)} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button></div>
+                
                 <div className="space-y-3">
-                  <div><label className="text-xs text-zinc-400 mb-1.5 block">Document Type</label>
+                  <div>
+                    <label className="text-xs text-zinc-400 mb-1.5 block">Document Type</label>
                     <select value={docType} onChange={(e) => setDocType(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-ink-800 border border-ink-700 text-white text-sm focus:border-curse-500/50 outline-none">
-                      <option value="passport">Passport</option><option value="drivers_license">Driver's License</option><option value="national_id">National ID</option>
+                      <option value="passport">Passport</option>
+                      <option value="drivers_license">Driver's License</option>
+                      <option value="national_id">National ID</option>
                     </select>
                   </div>
-                  <div className="rounded-xl bg-ink-800 p-4 border border-dashed border-ink-600 text-center"><Camera className="w-8 h-8 text-zinc-600 mx-auto mb-2" /><p className="text-xs text-zinc-500">Upload a photo of your {docType.replace('_', ' ')}</p><p className="text-[10px] text-zinc-600 mt-1">In production, this integrates with Sumsub / Persona API</p></div>
-                  <div className="rounded-xl bg-ink-800 p-4 border border-dashed border-ink-600 text-center"><Camera className="w-8 h-8 text-zinc-600 mx-auto mb-2" /><p className="text-xs text-zinc-500">Take a selfie for liveness check</p></div>
-                  <button onClick={submitTier2} disabled={submitting} className="w-full py-3 rounded-xl bg-gradient-to-r from-curse-500 to-curse-700 text-white font-bold text-sm shadow-curse-glow">{submitting ? 'Submitting...' : 'Submit for Verification'}</button>
+                  
+                  {/* FULLY FUNCTIONAL FILE UPLOAD REPLACING SUMSUB */}
+                  <div className="relative rounded-xl bg-ink-800 p-4 border border-dashed border-ink-600 text-center hover:bg-ink-700 transition-colors">
+                    <input
+                      type="file"
+                      accept="image/*,.pdf"
+                      onChange={(e) => setFile(e.target.files?.[0] || null)}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                    />
+                    <Camera className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                    <p className="text-xs text-zinc-400">
+                      {file ? (
+                        <span className="text-jade-400 font-semibold">{file.name}</span>
+                      ) : (
+                        `Upload a photo of your ${docType.replace('_', ' ')}`
+                      )}
+                    </p>
+                    <p className="text-[10px] text-zinc-600 mt-1">
+                      {file ? 'Tap to change file' : 'Tap to select file (Image or PDF)'}
+                    </p>
+                  </div>
+
+                  <button 
+                    onClick={submitTier2} 
+                    disabled={submitting || !file} 
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-curse-500 to-curse-700 text-white font-bold text-sm shadow-curse-glow disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {submitting ? 'Uploading Document...' : 'Submit for Verification'}
+                  </button>
                 </div>
+
               </motion.div>
             </motion.div>
           )}
@@ -171,4 +229,5 @@ export default function KYC() {
       </div>
     </div>
   );
-}
+  }
+      
