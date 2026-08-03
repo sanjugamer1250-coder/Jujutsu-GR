@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Swords, Coins, Zap, Trophy, Star, TrendingUp, RotateCcw, Shield, Hash, Lock } from 'lucide-react';
+import { Swords, Zap, Trophy, Star, TrendingUp, RotateCcw, Shield, Hash, Lock, CheckCircle2, UserPlus, Camera } from 'lucide-react';
 import { useDnaBalance, useCursedEnergy, useRoster, useTxLog, useStorageSync } from '@/lib/hooks';
-import { CHARACTERS, RARITY_META } from '@/lib/characters';
-import { fmt, fmtUsd, pushToast } from '@/lib/ui';
-import { resetAccount, readJSON, STORAGE_KEYS } from '@/lib/economy';
+import { CHARACTERS } from '@/lib/characters';
+import { fmt, pushToast } from '@/lib/ui';
+import { readJSON, STORAGE_KEYS } from '@/lib/economy';
+import { supabase } from '@/lib/supabase';
+import { useAccount } from 'wagmi';
 
 export default function Profile() {
   const dna = useDnaBalance();
@@ -15,124 +17,280 @@ export default function Profile() {
   const owned = CHARACTERS.filter((c) => roster.includes(c.id));
   const [tab, setTab] = useState<'roster' | 'stats' | 'history'>('roster');
 
+  // Database Profile State
+  const { address, isConnected } = useAccount();
+  const [profile, setProfile] = useState<any>(null);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [newUsername, setNewUsername] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
   const battles = readJSON<{ result: 'win' | 'loss' }[]>(STORAGE_KEYS.battleHistory, []);
   const wins = battles.filter((b) => b.result === 'win').length;
   const winRate = battles.length ? Math.round((wins / battles.length) * 100) : 0;
-  const storyProgress = readJSON<string[]>(STORAGE_KEYS.storyProgress, []);
   const collectionRate = Math.round((owned.length / CHARACTERS.length) * 100);
   const power = owned.reduce((s, c) => s + c.atk + c.def + c.hp / 10 + c.speed, 0);
 
+  // Fetch profile from Supabase on load
+  useEffect(() => {
+    async function fetchProfile() {
+      if (!address) {
+        setLoadingProfile(false);
+        setProfile(null);
+        return;
+      }
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('wallet_address', address)
+        .single();
+        
+      if (data) setProfile(data);
+      setLoadingProfile(false);
+    }
+    fetchProfile();
+  }, [address]);
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!address || !newUsername.trim()) return;
+    setIsRegistering(true);
+
+    try {
+      const { error } = await supabase.from('profiles').insert([
+        {
+          username: newUsername.trim(),
+          wallet_address: address,
+          kyc_status: 'unverified'
+        }
+      ]);
+
+      if (error) throw error;
+      
+      pushToast('Profile created successfully!', 'success');
+      // Instantly update the UI with the exact name
+      setProfile({ username: newUsername.trim(), wallet_address: address, kyc_status: 'unverified', avatar_url: null });
+    } catch (err: any) {
+      pushToast(err.message || 'Failed to create profile. Username might be taken.', 'error');
+    } finally {
+      setIsRegistering(false);
+    }
+  };
+
+  const uploadAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      setUploadingAvatar(true);
+      if (!event.target.files || event.target.files.length === 0 || !address) return;
+      
+      const file = event.target.files[0];
+      const fileExt = file.name.split('.').pop();
+      const filePath = `${address}_${Date.now()}.${fileExt}`;
+
+      // Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file);
+      if (uploadError) throw uploadError;
+
+      // Get the public URL for the image
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      // Save URL to the profiles table
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('wallet_address', address);
+      if (updateError) throw updateError;
+
+      // Update UI immediately
+      setProfile({ ...profile, avatar_url: publicUrl });
+      pushToast('Profile photo updated!', 'success');
+    } catch (error: any) {
+      pushToast(error.message || 'Error uploading photo', 'error');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
+      {/* Header Banner */}
       <motion.section initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="relative overflow-hidden rounded-3xl glass-strong border border-curse-500/30 p-6">
         <div className="absolute -top-16 -right-10 w-48 h-48 rounded-full bg-curse-500/20 blur-3xl" />
         <div className="relative flex items-center gap-4">
-          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-curse-500 to-energy-600 flex items-center justify-center shadow-curse-glow-lg shrink-0">
-            <Shield className="w-9 h-9 text-white" />
+          
+          {/* Profile Photo Area */}
+          <div className="relative w-20 h-20 rounded-2xl bg-ink-800 flex items-center justify-center border border-curse-500/50 overflow-hidden group shrink-0">
+            {profile?.avatar_url ? (
+              <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+            ) : profile?.username ? (
+              // Auto-generates a unique avatar based on their exact username if no photo is uploaded
+              <img src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${profile.username}`} alt="Avatar" className="w-full h-full object-cover bg-curse-900" />
+            ) : (
+              <Shield className="w-9 h-9 text-zinc-600" />
+            )}
+
+            {/* Upload Overlay (Only shows if they have a profile created) */}
+            {profile && (
+              <label className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                {uploadingAvatar ? (
+                  <RotateCcw className="w-6 h-6 text-white animate-spin" />
+                ) : (
+                  <Camera className="w-6 h-6 text-white" />
+                )}
+                <input type="file" accept="image/*" className="hidden" onChange={uploadAvatar} disabled={uploadingAvatar} />
+              </label>
+            )}
           </div>
+
           <div className="flex-1 min-w-0">
-            <div className="text-xs text-curse-300/70 tracking-[0.2em] uppercase">Sorcerer</div>
-            <h1 className="font-display font-black text-2xl text-white text-glow truncate">Commander</h1>
+            <div className="text-xs text-curse-300/70 tracking-[0.2em] uppercase">Sorcerer Profile</div>
+            <h1 className="font-display font-black text-2xl text-white text-glow truncate">
+              {profile ? profile.username : 'Guest Commander'}
+            </h1>
+            
             <div className="flex flex-wrap gap-2 mt-2">
-              <Badge icon={Coins} color="text-gold-400" label={`${fmt(dna)} 🧬 DNA`} />
-              <Badge icon={Zap} color="text-energy-400" label={`${fmt(energy)} CE`} />
-              <Badge icon={Trophy} color="text-curse-300" label={`${wins}W / ${battles.length - wins}L`} />
+              <span className="flex items-center gap-1 text-[10px] uppercase font-bold px-2 py-1 rounded bg-black/40 text-zinc-400 border border-white/5">
+                <Hash className="w-3 h-3" /> 
+                {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Wallet Not Connected'}
+              </span>
+              
+              {profile && (
+                <span className={`flex items-center gap-1 text-[10px] uppercase font-bold px-2 py-1 rounded border ${
+                  profile.kyc_status === 'approved' ? 'bg-jade-500/20 text-jade-400 border-jade-500/30' :
+                  profile.kyc_status === 'pending' ? 'bg-gold-500/20 text-gold-400 border-gold-500/30' :
+                  'bg-zinc-500/20 text-zinc-400 border-zinc-500/30'
+                }`}>
+                  {profile.kyc_status === 'approved' ? <CheckCircle2 className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                  KYC: {profile.kyc_status}
+                </span>
+              )}
             </div>
-          </div>
-        </div>
-        <div className="mt-5">
-          <div className="flex justify-between text-xs text-zinc-400 mb-1">
-            <span className="flex items-center gap-1"><Swords className="w-3 h-3" /> Total Power</span>
-            <span className="font-mono text-white">{Math.round(power)}</span>
-          </div>
-          <div className="h-2 rounded-full bg-ink-700 overflow-hidden">
-            <motion.div initial={{ width: 0 }} animate={{ width: `${Math.min(100, (power / 6000) * 100)}%` }} transition={{ duration: 0.8 }} className="h-full rounded-full bg-gradient-to-r from-curse-500 via-energy-500 to-gold-400" />
           </div>
         </div>
       </motion.section>
 
-      <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <MiniStat icon={Star} label="Collection" value={`${collectionRate}%`} color="text-gold-400" />
-        <MiniStat icon={Trophy} label="Win Rate" value={`${winRate}%`} color="text-jade-400" />
-        <MiniStat icon={Hash} label="Roster" value={`${owned.length}/${CHARACTERS.length}`} color="text-curse-300" />
-        <MiniStat icon={TrendingUp} label="Story" value={`${storyProgress.length}/8`} color="text-energy-400" />
-      </section>
-
-      <section>
-        <div className="flex gap-2 mb-4">
-          {(['roster', 'stats', 'history'] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 rounded-xl text-sm font-semibold capitalize transition-all ${tab === t ? 'bg-curse-500/20 text-curse-200 border border-curse-500/40 shadow-curse-glow' : 'glass text-zinc-400 border border-transparent'}`}>{t}</button>
-          ))}
-        </div>
-
-        {tab === 'roster' && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {CHARACTERS.map((c) => {
-              const has = roster.includes(c.id);
-              const meta = RARITY_META[c.rarity];
-              return (
-                <div key={c.id} className={`relative rounded-2xl overflow-hidden border ${has ? 'border-curse-500/30 glass' : 'border-ink-700 bg-ink-850/60'}`}>
-                  <div className="aspect-[3/4] relative">
-                    <img src={c.image} alt={c.name} className={`w-full h-full object-cover ${has ? '' : 'grayscale opacity-30'}`} onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')} />
-                    {!has && <div className="absolute inset-0 flex items-center justify-center"><Lock className="w-6 h-6 text-zinc-600" /></div>}
-                    <div className={`absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-md bg-black/70 text-[10px] font-bold font-mono ${meta.color}`}>{meta.label}</div>
-                  </div>
-                  <div className="p-2">
-                    <div className={`text-xs font-semibold truncate ${has ? 'text-white' : 'text-zinc-600'}`}>{c.name}</div>
-                    <div className="text-[10px] text-zinc-500 truncate">{c.title}</div>
-                    {has && <div className="flex gap-2 mt-1 text-[9px] font-mono text-zinc-400"><span>ATK {c.atk}</span><span>HP {c.hp}</span></div>}
-                  </div>
-                </div>
-              );
-            })}
+      {/* Registration Flow */}
+      {isConnected && !profile && !loadingProfile && (
+        <motion.section initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="glass-strong border border-yellow-500/30 rounded-2xl p-6 bg-yellow-500/5">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 bg-yellow-500/20 rounded-lg">
+              <UserPlus className="w-5 h-5 text-yellow-400" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white">Create Your Account</h2>
+              <p className="text-xs text-zinc-400">Register a username to join the leaderboards and unlock the game.</p>
+            </div>
           </div>
+          
+          <form onSubmit={handleRegister} className="flex gap-3">
+            <input
+              type="text"
+              required
+              maxLength={16}
+              value={newUsername}
+              onChange={(e) => setNewUsername(e.target.value)}
+              placeholder="Enter Username (e.g. SukunaVessel)"
+              className="flex-1 bg-ink-900 border border-ink-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-yellow-400"
+            />
+            <button
+              type="submit"
+              disabled={isRegistering || !newUsername.trim()}
+              className="px-6 py-3 rounded-xl bg-gradient-to-r from-yellow-600 to-yellow-500 text-slate-900 font-bold text-sm disabled:opacity-50"
+            >
+              {isRegistering ? 'Saving...' : 'Register'}
+            </button>
+          </form>
+        </motion.section>
+      )}
+
+      {/* Tabs */}
+      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+        {['roster', 'stats', 'history'].map((t) => (
+          <button 
+            key={t} 
+            onClick={() => setTab(t as any)} 
+            className={`px-5 py-2.5 rounded-xl text-sm font-bold capitalize transition-all ${
+              tab === t ? 'bg-gradient-to-r from-curse-500 to-curse-700 text-white shadow-curse-glow' : 'glass text-zinc-400 hover:text-white border border-transparent hover:border-zinc-700'
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab Content */}
+      <div className="space-y-4">
+        {tab === 'roster' && (
+           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+             {owned.length > 0 ? (
+               owned.map(c => (
+                  <div key={c.id} className="glass rounded-2xl p-4 flex flex-col items-center border border-ink-700">
+                     <div className="w-16 h-16 rounded-full bg-ink-800 mb-3 border-2 border-curse-500/50 flex items-center justify-center">
+                        <Swords className="w-6 h-6 text-curse-400" />
+                     </div>
+                     <div className="text-sm font-bold text-white truncate w-full text-center">{c.name}</div>
+                     <div className="text-[10px] text-zinc-500 uppercase mt-1">Power: {c.atk + c.def}</div>
+                  </div>
+               ))
+             ) : (
+               <div className="col-span-full glass p-8 rounded-2xl text-center border border-dashed border-ink-700">
+                 <Shield className="w-8 h-8 text-zinc-600 mx-auto mb-3" />
+                 <p className="text-sm font-bold text-zinc-400">Your roster is empty.</p>
+                 <p className="text-xs text-zinc-500 mt-1">Summon characters to build your team.</p>
+               </div>
+             )}
+           </div>
         )}
 
         {tab === 'stats' && (
-          <div className="glass rounded-2xl p-5 space-y-4">
-            <StatRow label="Total 🧬 DNA" value={fmtUsd(dna)} />
-            <StatRow label="Cursed Energy" value={fmt(energy)} />
-            <StatRow label="Characters owned" value={`${owned.length} / ${CHARACTERS.length}`} />
-            <StatRow label="Battles fought" value={`${battles.length}`} />
-            <StatRow label="Wins" value={`${wins}`} />
-            <StatRow label="Story chapters cleared" value={`${storyProgress.length}`} />
-            <StatRow label="Total Power" value={String(Math.round(power))} />
-            <div className="pt-3 border-t border-ink-700">
-              <button onClick={() => { if (confirm('Reset your entire account? This wipes all progress, 🧬 DNA, and characters.')) { resetAccount(); pushToast('Account reset.', 'info'); } }} className="flex items-center gap-2 text-blood-400 hover:text-blood-500 text-sm font-medium">
-                <RotateCcw className="w-4 h-4" /> Reset Account
-              </button>
-            </div>
-          </div>
+           <div className="grid grid-cols-2 gap-3">
+             <div className="glass p-5 rounded-2xl flex flex-col items-center justify-center text-center border border-ink-700">
+               <Trophy className="w-6 h-6 text-gold-400 mb-2" />
+               <div className="text-3xl font-black text-white">{winRate}%</div>
+               <div className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mt-1">Win Rate</div>
+             </div>
+             <div className="glass p-5 rounded-2xl flex flex-col items-center justify-center text-center border border-ink-700">
+               <Star className="w-6 h-6 text-curse-400 mb-2" />
+               <div className="text-3xl font-black text-white">{collectionRate}%</div>
+               <div className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mt-1">Collection</div>
+             </div>
+             <div className="glass p-5 rounded-2xl flex flex-col items-center justify-center text-center col-span-2 border border-ink-700 relative overflow-hidden">
+               <div className="absolute top-0 right-0 w-32 h-32 bg-energy-500/10 blur-2xl rounded-full" />
+               <Zap className="w-6 h-6 text-energy-400 mb-2 relative z-10" />
+               <div className="text-4xl font-black text-white text-glow relative z-10">{fmt(power)}</div>
+               <div className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider mt-1 relative z-10">Total Combat Power</div>
+             </div>
+           </div>
         )}
 
         {tab === 'history' && (
-          <div className="glass rounded-2xl divide-y divide-ink-700">
-            {txLog.length === 0 ? <div className="p-6 text-center text-zinc-500 text-sm">No transactions yet.</div> :
-              txLog.slice(0, 30).map((t) => (
-                <div key={t.id} className="flex items-center justify-between px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${t.direction === 'in' ? 'bg-jade-400' : 'bg-blood-400'}`} />
-                    <div>
-                      <div className="text-sm text-white capitalize">{t.type}</div>
-                      <div className="text-[10px] text-zinc-500">{t.note || new Date(t.ts).toLocaleString()}</div>
-                    </div>
-                  </div>
-                  <div className={`font-mono text-sm ${t.direction === 'in' ? 'text-jade-400' : 'text-blood-400'}`}>{t.direction === 'in' ? '+' : '-'}{fmt(t.amount)}</div>
-                </div>
-              ))}
-          </div>
+           <div className="glass rounded-2xl p-4 border border-ink-700 space-y-2">
+             {txLog.length === 0 ? (
+               <div className="text-center text-zinc-500 py-8 text-sm flex flex-col items-center">
+                 <RotateCcw className="w-8 h-8 mb-3 opacity-20" />
+                 No recent economy activity.
+               </div>
+             ) : (
+               txLog.slice(0, 10).map((tx, i) => (
+                 <div key={i} className="bg-ink-900/50 p-3 rounded-xl flex items-center justify-between border border-ink-800">
+                   <div className="flex items-center gap-3">
+                     <div className={`p-2 rounded-lg ${tx.amount > 0 ? 'bg-jade-500/10' : 'bg-blood-500/10'}`}>
+                       {tx.amount > 0 ? <TrendingUp className="w-4 h-4 text-jade-400" /> : <TrendingUp className="w-4 h-4 text-blood-400 rotate-180" />}
+                     </div>
+                     <div className="text-sm font-semibold text-zinc-300 capitalize">{tx.type.replace('_', ' ')}</div>
+                   </div>
+                   <div className={`text-sm font-bold ${tx.amount > 0 ? 'text-jade-400' : 'text-blood-400'}`}>
+                     {tx.amount > 0 ? '+' : ''}{tx.amount}
+                   </div>
+                 </div>
+               ))
+             )}
+           </div>
         )}
-      </section>
+      </div>
     </div>
   );
-}
-
-function Badge({ icon: Icon, color, label }: { icon: typeof Coins; color: string; label: string }) {
-  return <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-ink-800/80 border border-ink-700 text-xs font-mono font-semibold ${color}`}><Icon className="w-3 h-3" /> {label}</span>;
-}
-function MiniStat({ icon: Icon, label, value, color }: { icon: typeof Coins; label: string; value: string; color: string }) {
-  return <div className="glass rounded-2xl p-3 text-center"><Icon className={`w-5 h-5 mx-auto mb-1 ${color}`} /><div className={`font-mono font-bold text-lg ${color}`}>{value}</div><div className="text-[10px] text-zinc-500 uppercase tracking-wider">{label}</div></div>;
-}
-function StatRow({ label, value }: { label: string; value: string }) {
-  return <div className="flex items-center justify-between"><span className="text-sm text-zinc-400">{label}</span><span className="font-mono font-semibold text-white">{value}</span></div>;
 }
