@@ -76,6 +76,31 @@ export default {
           '0%': { width: '0' },
           '100%': { width: '100%' },
         },
+
+        /* Character / performance-friendly keyframes for the game */
+        'char-idle': {
+          '0%': { transform: 'translateY(0) translateZ(0)' },
+          '50%': { transform: 'translateY(-6px) translateZ(0)' },
+          '100%': { transform: 'translateY(0) translateZ(0)' },
+        },
+        'char-attack': {
+          '0%': { transform: 'translateX(0) rotate(0deg)' },
+          '30%': { transform: 'translateX(8px) rotate(6deg)' },
+          '60%': { transform: 'translateX(-6px) rotate(-4deg)' },
+          '100%': { transform: 'translateX(0) rotate(0deg)' },
+        },
+        'char-enter': {
+          '0%': { opacity: '0', transform: 'translateY(12px) scale(0.98) translateZ(0)' },
+          '100%': { opacity: '1', transform: 'translateY(0) scale(1) translateZ(0)' },
+        },
+        'aura-spin': {
+          '0%': { transform: 'rotate(0deg)' },
+          '100%': { transform: 'rotate(360deg)' },
+        },
+        'page-fade': {
+          '0%': { opacity: '0', transform: 'translateY(6px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
       },
       animation: {
         'pulse-glow': 'pulse-glow 2.5s ease-in-out infinite',
@@ -86,6 +111,12 @@ export default {
         'domain-expand': 'domain-expand 0.8s ease-out forwards',
         'cursed-pulse-blue': 'cursed-pulse-blue 2s ease-in-out infinite',
         'cursed-pulse-red': 'cursed-pulse-red 2s ease-in-out infinite',
+        /* Character animations: keep them GPU-friendly (transform/opacity only) */
+        'char-idle': 'char-idle 3s ease-in-out infinite',
+        'char-attack': 'char-attack 0.8s cubic-bezier(.2,.9,.3,1) both',
+        'char-enter': 'char-enter 0.35s cubic-bezier(.2,.9,.3,1) both',
+        'aura-spin': 'aura-spin 6s linear infinite',
+        'page-fade': 'page-fade 0.28s ease-out both',
       },
     },
   },
