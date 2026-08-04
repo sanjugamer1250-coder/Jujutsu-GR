@@ -156,3 +156,30 @@ body {
 input, button, select, textarea { font-family: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
+
+/* ===== Additional Jujutsu theme helpers: aura, brush texture, performance-minded animations ===== */
+
+/* Aura spin (GPU-only transform) */
+.animate-aura-spin { transform-origin: 50% 50%; will-change: transform; animation: aura-spin 6s linear infinite; }
+@keyframes aura-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+/* Brush stroke / texture overlay (uses an SVG asset) */
+.bg-brush-pattern { background-image: url('/assets/ui/brush-stroke.svg'); background-size: cover; background-position: center; pointer-events: none; }
+
+/* Subtle shimmer for texture layers */
+.animate-shimmer { animation: shimmer 3s linear infinite; background-size: 200% auto; }
+
+/* Lightweight idle animation for characters (transform only) */
+.animate-char-idle { animation: char-idle 3.2s ease-in-out infinite; will-change: transform, opacity; }
+@keyframes char-idle { 0% { transform: translateY(0); } 50% { transform: translateY(-6px); } 100% { transform: translateY(0); } }
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-aura-spin, .animate-shimmer, .animate-char-idle { animation: none !important; }
+}
+
+/* Limit visual noise on small viewports */
+@media (max-width: 640px) {
+  .animate-char-idle { animation-duration: 4.4s; }
+  .bg-brush-pattern { opacity: 0.25; }
+}
