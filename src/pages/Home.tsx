@@ -1,5 +1,5 @@
 import React from 'react';
-import Link from 'next/link';
+import { Link } from 'wouter';
 import { Zap } from 'lucide-react';
 import { useRoster } from '@/lib/hooks';
 import Character from '@/components/Character';
@@ -36,7 +36,7 @@ export default function Home() {
           <p className="text-zinc-400 text-sm mt-2">Fight, summon, and collect sorcerers across domains.</p>
 
           <div className="flex flex-wrap gap-3 mt-5">
-            <Link href="/characters" className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-curse-500 to-curse-700 text-white font-semibold text-sm shadow-curse-glow hover:shadow-curse-glow-lg transition-shadow inline-flex items-center gap-2">
+            <Link href="/characters" className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-curse-500 to-curse-700 text-white font-semibold text-sm shadow-curse-glow hover:shadow-curse-glow-lg tr[...]
               <Zap className="w-4 h-4" /> Start Summoning
             </Link>
           </div>
