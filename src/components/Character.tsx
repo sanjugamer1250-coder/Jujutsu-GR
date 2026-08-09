@@ -1,80 +1,46 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
-
-type Aura = 'blue' | 'red' | 'purple' | 'gold' | 'cyan' | 'none';
 
 type Props = {
   name?: string;
-  src?: string; // expected to be a path like /assets/characters/slug.avif (we'll derive webp/jpg fallbacks)
-  size?: number; // px
-  aura?: Aura;
-  className?: string;
+  src: string;
+  size?: number;
+  aura?: 'cyan' | 'purple' | 'red' | 'gold' | 'none' | string;
   upcoming?: boolean;
+  className?: string;
 };
 
-export function Character({ name, src, size = 220, aura = 'purple', className = '', upcoming = false }: Props) {
-  // Respect prefers-reduced-motion
-  const prefersReduced = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const [errored, setErrored] = useState(false);
-
-  const auraClass =
-    aura === 'blue' ? 'neon-border-blue/40 animate-aura-spin' :
-    aura === 'red' ? 'neon-border-red/40 animate-aura-spin' :
-    aura === 'gold' ? 'shadow-gold-glow animate-aura-spin' :
-    aura === 'cyan' ? 'shadow-neon-blue animate-aura-spin' :
-    aura === 'none' ? '' : 'neon-border-purple/40 animate-aura-spin';
-
-  // Build fallback filenames from the provided src by stripping extension
-  const base = src ? src.replace(/\.[^.\/]+$/, '') : '';
-  const avif = base ? `${base}.avif` : '';
-  const webp = base ? `${base}.webp` : '';
-  const jpg = base ? `${base}.jpg` : '';
-
-  // If an error occurred trying to load the image, fall back to upcoming svg
-  const showFallback = errored || (!src && upcoming);
-  const fallbackSrc = '/assets/characters/upcoming.svg';
+export default function Character({ name, src, size = 220, aura = 'purple', upcoming = false, className = '' }: Props) {
+  const auraClass = aura === 'cyan' ? 'aura-cyan' : aura === 'red' ? 'aura-red' : aura === 'gold' ? 'aura-gold' : aura === 'purple' ? 'aura-purple' : '';
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
+      initial={{ opacity: 0, y: 8, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.35, ease: [0.2, 0.9, 0.3, 1] }}
       className={`relative inline-block ${className}`}
       aria-label={name}
     >
-      {/* aura ring */}
-      <div
-        aria-hidden
-        className={`absolute -z-10 rounded-full ${auraClass} pointer-events-none`}
-        style={{ width: size * 1.3, height: size * 1.3, left: '50%', transform: 'translateX(-50%) translateY(-6%)', filter: 'blur(14px)' }}
+      <div className="absolute -z-10 rounded-full pointer-events-none" style={{ width: size * 1.4, height: size * 1.4, left: '50%', transform: 'translateX(-50%) translateY(-6%)' }}>
+        <div className={`w-full h-full rounded-full ${auraClass} opacity-90`} />
+      </div>
+
+      <img
+        src={src}
+        alt={name}
+        width={size}
+        height={size}
+        decoding="async"
+        loading="lazy"
+        className={`will-change-transform transform ${upcoming ? 'grayscale blur-[0.4px] opacity-80' : 'animate-char-idle'} rounded-md select-none pointer-events-none object-cover`}
+        style={{ backfaceVisibility: 'hidden' }}
       />
 
-      {showFallback ? (
-        <div
-          className={`w-[${size}px] h-[${size}px] bg-ink-800 flex items-center justify-center rounded-lg text-zinc-500 text-sm font-semibold`}
-          style={{ width: size, height: size }}
-        >
-          <img src={fallbackSrc} alt={name} style={{ width: '80%', height: '80%', objectFit: 'contain' }} />
+      {upcoming && (
+        <div className="absolute inset-0 flex items-end justify-center pb-2">
+          <div className="text-[10px] bg-black/60 text-zinc-200 px-2 py-1 rounded-md font-mono">Upcoming</div>
         </div>
-      ) : (
-        <picture>
-          {avif && <source srcSet={avif} type="image/avif" />}
-          {webp && <source srcSet={webp} type="image/webp" />}
-          <img
-            src={jpg || src}
-            alt={name}
-            width={size}
-            height={size}
-            decoding="async"
-            loading="lazy"
-            onError={() => setErrored(true)}
-            className={`w-[${size}px] h-[${size}px] object-cover rounded-lg select-none pointer-events-none will-change-transform ${!prefersReduced ? 'animate-char-idle' : ''}`}
-            style={{ backfaceVisibility: 'hidden' }}
-          />
-        </picture>
       )}
     </motion.div>
   );
 }
-
-export default Character;
